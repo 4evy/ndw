@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>systems.determinate.nix-installer.nix-hook</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>/bin/wait4path /nix/nix-installer &amp;&amp; /nix/nix-installer repair</string>
+	</array>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>StandardErrorPath</key>
+	<string>/nix/.nix-installer-hook.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/nix/.nix-installer-hook.out.log</string>
+</dict>
+</plist>

@@ -1,0 +1,213 @@
+{ lib, settingsLib, ... }:
+# System Settings deletes a key when the choice matches the region's
+# default. these options always write it so the result doesn't depend on
+# the region
+let
+  page = (settingsLib.systemPage "General" "com.apple.settings.general").navigate "Language & Region" open;
+  inherit (page) setting select checkbox;
+
+  inherit (settingsLib)
+    global
+    text
+    strings
+    enum
+    ops
+    ;
+
+  open = [ "com.apple.systempreferences.general.languageAndRegion" ];
+
+  dictionaries = lib.mapAttrs (_: dictionary: { value = dictionary; });
+
+  # System Settings stores U+202F NARROW NO-BREAK SPACE for a space group
+  # separator. labels here use a plain space
+  space = " ";
+
+  # cfprefsd puts a sandboxed app's preferences in its container
+  appLanguages =
+    id: languages:
+    let
+      q = lib.escapeShellArg;
+      domain = q id;
+    in
+    if languages == [ ] then
+      "/usr/bin/defaults delete ${domain} AppleLanguages 2>/dev/null || true"
+    else
+      "/usr/bin/defaults write ${domain} AppleLanguages -array ${
+        lib.concatMapStringsSep " " (l: "-string ${q l}") languages
+      }";
+
+  numberSymbols = decimal: group: {
+    "0" = decimal;
+    "1" = group;
+    "10" = decimal;
+    "17" = group;
+  };
+in
+{
+  preferredLanguages = setting {
+    ui = "Preferred Languages";
+    description = "Language tags in order of preference, the first being the primary language, e.g. [ \"en-US\" \"nl-NL\" ].";
+    storage = global "AppleLanguages";
+    value = strings;
+  };
+
+  region = setting {
+    ui = "Region";
+    description = ''
+      The locale: the primary language, the region, and optionally the calendar, e.g.
+      "en_NL", "en_US@rg=nlzzzz" (US English with the formats of the Netherlands) or
+      "en_NL@calendar=japanese".
+    '';
+    storage = global "AppleLocale";
+    value = text;
+  };
+
+  temperature = setting {
+    ui = "Temperature";
+    storage = global "AppleTemperatureUnit";
+    value = enum {
+      "Celsius (°C)" = "Celsius";
+      "Fahrenheit (°F)" = "Fahrenheit";
+    };
+    verify = {
+      expect = {
+        "Celsius (°C)" = {
+          "AXRadioButton:Celsius (°C) + Temperature" = 1;
+        };
+        "Fahrenheit (°F)" = {
+          "AXRadioButton:Fahrenheit (°F) + Temperature" = 1;
+        };
+      };
+    };
+  };
+
+  measurementSystem = setting {
+    ui = "Measurement system";
+    storage = {
+      units = global "AppleMeasurementUnits";
+      metric = global "AppleMetricUnits";
+    };
+    value = enum {
+      Metric = {
+        units = "Centimeters";
+        metric = true;
+      };
+      US = {
+        units = "Inches";
+        metric = false;
+      };
+      UK = {
+        units = "Inches";
+        metric = true;
+      };
+    };
+    verify = {
+      expect = lib.genAttrs [ "Metric" "US" "UK" ] (system: {
+        "AXRadioButton:${system} + Measurement system" = 1;
+      });
+    };
+  };
+
+  firstDayOfWeek = select {
+    ui = "First day of week";
+    storage = global "AppleFirstWeekday";
+    value = enum (
+      dictionaries (
+        lib.listToAttrs (
+          lib.imap1 (number: day: lib.nameValuePair day { gregorian = number; }) [
+            "Sunday"
+            "Monday"
+            "Tuesday"
+            "Wednesday"
+            "Thursday"
+            "Friday"
+            "Saturday"
+          ]
+        )
+      )
+    );
+    control = "AXPopUpButton:first-weekday";
+    choices = [
+      "Monday"
+      "Sunday"
+    ];
+  };
+
+  dateFormat = select {
+    ui = "Date format";
+    storage = global "AppleICUDateFormatStrings";
+    value = enum (
+      dictionaries (
+        lib.mapAttrs (_: pattern: { "1" = pattern; }) {
+          "19/08/2026" = "dd/MM/y";
+          "8/19/26" = "M/d/yy";
+          "19/8/26" = "d/M/yy";
+          "8/19/2026" = "M/d/y";
+          "19.08.2026" = "dd.MM.y";
+          "19-08-2026" = "dd-MM-y";
+          "2026/8/19" = "y/M/d";
+          "2026.08.19" = "y.MM.dd";
+          "2026-08-19" = "y-MM-dd";
+        }
+      )
+    );
+    control = "AXPopUpButton:date-format";
+    choices = [
+      "19/08/2026"
+      "2026-08-19"
+    ];
+  };
+
+  numberFormat = select {
+    ui = "Number format";
+    storage = global "AppleICUNumberSymbols";
+    value = enum (dictionaries {
+      "1,234,567.89" = numberSymbols "." ",";
+      "1.234.567,89" = numberSymbols "," ".";
+      "1 234 567.89" = numberSymbols "." space;
+      "1 234 567,89" = numberSymbols "," space;
+    });
+    control = "AXPopUpButton:number-format";
+    choices = [
+      "1,234,567.89"
+      "1.234.567,89"
+    ];
+  };
+
+  liveText = checkbox "Live Text" (global "AppleLiveTextEnabled") "AXCheckBox:live-text";
+
+  applications = setting {
+    ui = "Applications";
+    description = ''
+      Languages for single apps, by bundle identifier, most preferred first, e.g.
+      { "com.spotify.client" = [ "nl" ]; }. An empty list makes the app follow the system again.
+      Apps left out are left as they are.
+    '';
+    storage = global "AppleLanguages" // {
+      domain = "~/Library/Preferences/<application>";
+    };
+    value = {
+      kind = "applications";
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      choices = [ ];
+      examples = [ { "com.example.app" = [ "nl" ]; } ];
+      encode = _: apps: lib.mapAttrsToList (id: languages: ops.run (appLanguages id languages)) apps;
+      fromName = builtins.fromJSON;
+    };
+    canUnset = false;
+    # system services keep copies of the global list, which Language & Region
+    # doesn't show
+    reads.command = ''
+      printf '{'
+      /usr/bin/grep -l AppleLanguages ~/Library/Preferences/*.plist ~/Library/Containers/*/Data/Library/Preferences/*.plist 2>/dev/null | while IFS= read -r file; do
+        id=$(basename "$file" .plist)
+        case "$file" in */Containers/*) [ "$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$file")")")")")" = "$id" ] || continue ;; esac
+        case "$id" in .*) continue ;; esac
+        languages=$(/usr/bin/plutil -extract AppleLanguages json -o - "$file" 2>/dev/null) || continue
+        /usr/bin/mdfind "kMDItemCFBundleIdentifier == '$id'" | /usr/bin/grep -q '\.app$' || continue
+        printf '%s"%s":%s' "$separator" "$id" "$languages"; separator=,
+      done
+      printf '}'
+    '';
+  };
+}

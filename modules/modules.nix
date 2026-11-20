@@ -19,5 +19,6 @@
     ./zsh/zsh.nix
     ./launchd/launchd.nix
     ./homebrew/homebrew.nix
+    ./nh/nh.nix
   ];
 }

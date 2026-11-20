@@ -60,6 +60,11 @@ upgrades once that's enabled
 Keep `lib.darwinSystem`, `darwinConfigurations`, and `darwin-rebuild`. See the
 [alias map](modules/aliases/aliases.nix) for renamed options
 
+The legacy `system.activationScripts` hooks `preActivation`, `users`,
+`applications`, and `postActivation` run during a switch, not during a
+check or boot restore. Use `system.activation.steps` for new hooks with
+explicit dependencies.
+
 ndw does not provide all upstream services or state-version defaults. It
 manages only Determinate Nix, and launchd agents target the primary user
 

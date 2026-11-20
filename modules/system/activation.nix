@@ -51,7 +51,7 @@ let
         (render "text" "restoring" bootSteps)
         (
           lib.strings.optionalString
-            (legacyHooks.preActivation.text != "" || legacyHooks.postActivation.text != "")
+            (lib.lists.any (hook: hook.text != "") (lib.attrsets.attrValues legacyHooks))
             ''
               # shellcheck disable=SC2034
               systemConfig=$system
@@ -73,10 +73,20 @@ in
       [ "system" "activation" "content" ]
     )
   ];
-  options.system.activationScripts.preActivation.text = mkDefaultOption lib.types.lines "" ''
-    Legacy root activation hook. Runs after ndw's preflight and before
-    normal activation steps, never during a check or boot restore.
-  '';
+  options.system.activationScripts = {
+    preActivation.text = mkDefaultOption lib.types.lines "" ''
+      Legacy root activation hook. Runs after ndw's preflight and before
+      normal activation steps, never during a check or boot restore.
+    '';
+    users.text = mkDefaultOption lib.types.lines "" ''
+      Legacy root activation hook. Runs after account setup and before
+      application installation, never during a check or boot restore.
+    '';
+    applications.text = mkDefaultOption lib.types.lines "" ''
+      Legacy root activation hook. Runs after application installation and
+      before loading launchd jobs, never during a check or boot restore.
+    '';
+  };
   options.system.activation = {
     runtimeInputs =
       mkDefaultOption (lib.types.listOf lib.types.package) [ ]
@@ -128,6 +138,16 @@ in
       message = "Boot activation step ${step.name} depends on a step that does not run at boot";
     }) bootSteps;
     system.activation.steps = {
+      legacy-users = {
+        deps = [ "users" ];
+        inherit (legacyHooks.users) text;
+      };
+      applications.deps = [ "legacy-users" ];
+      legacy-applications = {
+        deps = [ "applications" ];
+        inherit (legacyHooks.applications) text;
+      };
+      launchd.deps = [ "legacy-applications" ];
       extra = {
         deps = [ "launchd" ];
         inherit (cfg) functions checks;

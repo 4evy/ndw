@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   options,
   pkgs,
@@ -27,6 +28,10 @@ in
         mkDefaultOption lib.types.lines "autoload -U compinit && compinit"
           "Completion initialization commands.";
     };
+    enableGlobalCompInit =
+      mkDefaultOption lib.types.bool config.programs.zsh.completion.enable
+        "Whether to run compinit separately from installing Zsh completions.";
+    enableBashCompletion = lib.options.mkEnableOption "Bash completion support in Zsh";
     default.keymap = lib.darwin.options.mkNullableOption (lib.types.enum [
       "emacs"
       "viins"
@@ -40,6 +45,10 @@ in
         set before expanding profile paths in the shared environment.
       '';
     };
+    variables = mkDefaultOption (lib.types.addCheck
+      (lib.types.attrsOf (lib.types.either lib.types.str (lib.types.listOf lib.types.str)))
+      (values: lib.lists.all lib.strings.isValidPosixName (builtins.attrNames values))
+    ) { } "Legacy login-shell variables. Lists are joined with colons.";
     local.variables =
       mkDefaultOption (lib.types.attrsOf lib.types.anything) { }
         "Local scalars, arrays, and associative arrays.";
@@ -54,6 +63,10 @@ in
       for early setup, 550 before completion, 1000 for normal configuration,
       and 1500 for commands after plugins and highlighting.
     '';
+    interactiveShellInit =
+      mkDefaultOption lib.types.lines ""
+        "Legacy Zsh interactive startup commands, run before completion.";
+    promptInit = mkDefaultOption lib.types.lines "" "Legacy Zsh prompt setup, run before completion.";
     env.extra = mkDefaultOption lib.types.lines "" "Extra commands for all Zsh shells.";
     profile.extra = mkDefaultOption lib.types.lines "" "Extra commands for login-shell setup.";
     login.extra = mkDefaultOption lib.types.lines "" "Extra commands after login-shell setup.";

@@ -4,7 +4,7 @@ let
   cfg = config.homebrew;
   nullable = lib.darwin.options.mkNullableOption;
   strings = mkDefaultOption (lib.types.listOf lib.types.str) [ ];
-  caskArgs = lib.types.attrsOf (lib.types.either lib.types.str lib.types.bool);
+  caskArgs = lib.types.attrsOf (lib.types.nullOr (lib.types.either lib.types.str lib.types.bool));
   entries =
     options: description:
     lib.options.mkOption {
@@ -199,6 +199,7 @@ in
         };
     } "Repositories to tap, as names or attribute sets. Attributes use native Brewfile names.";
     cask.args = mkDefaultOption caskArgs { } "Native Homebrew options applied to every cask." // {
+      apply = lib.attrsets.filterAttrs (_: value: value != null);
       example = {
         appdir = "~/Applications";
         require_sha = true;

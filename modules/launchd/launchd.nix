@@ -27,14 +27,30 @@ let
     inherit lib;
     plistType = plist.type;
   };
-  environmentType = lib.types.addCheck (lib.types.attrsOf lib.types.str) (
+  environmentValue = lib.types.either lib.types.str (lib.types.listOf lib.types.str);
+  environmentType = lib.types.addCheck (lib.types.attrsOf environmentValue) (
     values:
     lib.lists.all (name: name != "" && !lib.strings.hasInfix "=" name) (builtins.attrNames values)
   );
+  normalizeEnvironment = lib.attrsets.mapAttrs (
+    _: value: if builtins.isList value then lib.strings.concatStringsSep ":" value else value
+  );
   job = lib.types.submodule (
-    { name, config, ... }: {
+    { name, config, ... }:
+    let
+      environment =
+        normalizeEnvironment (removeAttrs config.environment [ "variables" ])
+        // config.environment.variables;
+    in
+    {
+      imports = [
+        (lib.modules.mkAliasOptionModule [ "serviceConfig" ] [ "config" ])
+      ];
       options = {
-        enable = lib.options.mkEnableOption "this launchd job";
+        enable = mkDefaultOption lib.types.bool (
+          config.config.Program != null
+          || (config.config.ProgramArguments != null && config.config.ProgramArguments != [ ])
+        ) "Whether to install this job. Defaults to enabled when a command is configured.";
         load.on.activation = mkDefaultOption lib.types.bool true ''
           Load this job during activation. When disabled, install and enable
           the job but leave it unloaded until the next boot or login.
@@ -75,8 +91,18 @@ let
         '';
         launcher.shell = mkDefaultOption lib.types.str "/bin/sh" "Interpreter used for the launcher.";
         script = mkDefaultOption lib.types.lines "" "Shell commands used instead of ProgramArguments.";
-        path = mkDefaultOption (lib.types.listOf lib.types.package) [ ] "Packages added to the job's PATH.";
-        environment.variables = mkDefaultOption environmentType { } "Job environment variables.";
+        command =
+          mkDefaultOption (lib.types.either lib.types.str lib.types.path) ""
+            "Legacy shell command used in place of ProgramArguments.";
+        path = mkDefaultOption (lib.types.listOf (
+          lib.types.either lib.types.package (lib.types.either lib.types.path lib.types.str)
+        )) [ ] "Packages or literal directories added to the job's PATH.";
+        environment = mkDefaultOption (lib.types.submodule {
+          config._module.freeformType = environmentType;
+          options.variables = mkDefaultOption environmentType { } "Job environment variables." // {
+            apply = normalizeEnvironment;
+          };
+        }) { } "Job environment variables. Prefer setting the variables suboption.";
         config = mkDefaultOption (lib.types.submodule native) { } "Native launchd.plist keys.";
         extra.config = lib.options.mkOption {
           type =
@@ -91,27 +117,41 @@ let
         };
       };
       config.environment.variables.PATH = lib.modules.mkIf (config.path != [ ]) (
-        lib.modules.mkDefault (lib.strings.makeBinPath config.path)
+        lib.modules.mkDefault (
+          lib.strings.concatMapStringsSep ":" (
+            value: if lib.attrsets.isDerivation value then "${value}/bin" else toString value
+          ) config.path
+        )
       );
       config.environment.variables.DARWIN_RESTART_TRIGGERS = lib.modules.mkIf (
         config.restart.triggers != [ ]
       ) (lib.strings.concatMapStringsSep ":" (path: "${path}") config.restart.triggers);
       config.config = {
-        Label = lib.modules.mkDefault "org.nixos.${name}";
+        Label = lib.modules.mkDefault "${cfg.labelPrefix}.${name}";
         LimitLoadToSessionType = lib.modules.mkIf (config.domain == "user") (
           lib.modules.mkDefault "Background"
         );
-        ProgramArguments = lib.modules.mkIf (config.script != "") [
-          "${
-            pkgs.writeShellApplication {
-              name = "job";
-              runtimeInputs = config.path;
-              text = config.script;
-            }
-          }/bin/job"
-        ];
-        EnvironmentVariables = lib.modules.mkIf (config.environment.variables != { }) (
-          lib.attrsets.mapAttrs (_: lib.modules.mkDefault) config.environment.variables
+        ProgramArguments = lib.modules.mkIf (config.script != "" || config.command != "") (
+          lib.modules.mkDefault (
+            if config.script != "" then
+              [
+                (lib.meta.getExe (
+                  pkgs.writeShellApplication {
+                    name = "job";
+                    text = config.script;
+                  }
+                ))
+              ]
+            else
+              [
+                "/bin/sh"
+                "-c"
+                "exec ${config.command}"
+              ]
+          )
+        );
+        EnvironmentVariables = lib.modules.mkIf (environment != { }) (
+          lib.attrsets.mapAttrs (_: lib.modules.mkDefault) environment
         );
       };
     }
@@ -626,6 +666,27 @@ let
 
 in
 {
+  imports = [
+    (lib.modules.mkAliasOptionModule [ "launchd" "user" "agents" ] [ "launchd" "agents" ])
+    (lib.modules.mkAliasOptionModule
+      [ "launchd" "envVariables" ]
+      [
+        "launchd"
+        "system"
+        "environment"
+        "variables"
+      ]
+    )
+    (lib.modules.mkAliasOptionModule
+      [ "launchd" "user" "envVariables" ]
+      [
+        "launchd"
+        "environment"
+        "variables"
+      ]
+    )
+  ];
+
   options.launchd = {
     stop.timeout = mkDefaultOption lib.types.ints.positive 120 ''
       Maximum seconds to wait for a job to leave launchd during activation.
@@ -633,17 +694,25 @@ in
       its recovery journal. The launchctl process is given five additional
       seconds to exit after TERM.
     '';
+    labelPrefix = mkDefaultOption lib.types.str "org.nixos" "Default prefix for launchd labels.";
     agents = mkDefaultOption (lib.types.attrsOf job) { } "Agents installed for system.primary.user.";
     daemons = mkDefaultOption (lib.types.attrsOf job) { } "System launchd daemons.";
-    environment.variables = mkDefaultOption environmentType { } ''
-      Variables set in the primary user's launchd context. Activation
-      and the login helper restart Dock when managed values change so apps
-      launched from Dock inherit them. Other running apps retain their
-      existing environment until restarted
-    '';
+    environment.variables =
+      mkDefaultOption environmentType { } ''
+        Variables set in the primary user's launchd context. Activation
+        and the login helper restart Dock when managed values change so apps
+        launched from Dock inherit them. Other running apps retain their
+        existing environment until restarted
+      ''
+      // {
+        apply = normalizeEnvironment;
+      };
     system.environment.variables =
       mkDefaultOption environmentType { }
-        "Variables set in root's launchd context during activation and boot.";
+        "Variables set in root's launchd context during activation and boot."
+      // {
+        apply = normalizeEnvironment;
+      };
   };
   config = {
     # Background agents need registration outside Aqua's discovery domain

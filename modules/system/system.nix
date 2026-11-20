@@ -19,6 +19,10 @@ in
       label = mkDefaultOption lib.types.str "darwin" "Name of the built system.";
       revision = lib.darwin.options.mkNullableOption lib.types.str "Source revision of this Darwin implementation.";
       configuration.revision = lib.darwin.options.mkNullableOption lib.types.str "Revision of the configuration flake.";
+      stateVersion = mkDefaultOption lib.types.ints.positive 7 ''
+        Legacy nix-darwin state version exposed to imported modules and
+        recorded in system metadata. It does not change ndw's core defaults.
+      '';
       primary.user = lib.darwin.options.mkNullableOption lib.types.str "Existing user whose settings and launchd agents are managed.";
       profile =
         mkDefaultOption lib.types.path "/nix/var/nix/profiles/system"
@@ -43,7 +47,7 @@ in
         activate = lib.meta.getExe cfg.build.activation;
         "files.json" = cfg.build.manifest;
         "metadata.json" = (pkgs.formats.json { }).generate "metadata.json" {
-          inherit (cfg) label revision;
+          inherit (cfg) label revision stateVersion;
           configuration = cfg.configuration.revision;
           nixpkgs = config.nixpkgs.source.rev or null;
         };

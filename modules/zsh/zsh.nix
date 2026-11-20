@@ -66,9 +66,13 @@ in
       '')
       (mkIf (cfg.default.keymap != null) (mkOrder 530 keymaps.${cfg.default.keymap}))
       (mkOrder 540 (lib.strings.toShellVars cfg.local.variables))
-      (mkIf (cfg.completion.enable && !cfg.oh.my.zsh.enable && !cfg.prezto.enable) (
+      (mkOrder 550 config.environment.interactiveShellInit)
+      (mkOrder 551 cfg.interactiveShellInit)
+      (mkOrder 552 cfg.promptInit)
+      (mkIf (cfg.enableGlobalCompInit && !cfg.oh.my.zsh.enable && !cfg.prezto.enable) (
         mkOrder 570 cfg.completion.init
       ))
+      (mkIf cfg.enableBashCompletion (mkOrder 580 "autoload -U bashcompinit && bashcompinit"))
       (mkIf (cfg.site.functions != { }) (
         mkOrder 560 ''
           fpath=(${functions} $fpath)
@@ -121,7 +125,15 @@ in
             ${cfg.env.extra}
           fi
         '';
-        zprofile.text = cfg.profile.extra;
+        zprofile.text = ''
+          ${lib.strings.concatMapAttrsStringSep "\n" (
+            name: value:
+            "${name}=${
+              shell.doubleQuote (if builtins.isList value then lib.strings.concatStringsSep ":" value else value)
+            }"
+          ) cfg.variables}
+          ${cfg.profile.extra}
+        '';
         zshrc.text = cfg.init.content;
         zlogin = mkIf (cfg.login.extra != "") { text = cfg.login.extra; };
         zlogout = mkIf (cfg.logout.extra != "") {

@@ -37,7 +37,7 @@ let
   };
   created = import cfg.source {
     inherit (cfg) config overlays;
-    system = "aarch64-darwin";
+    localSystem = cfg.hostPlatform;
   };
 in
 {
@@ -47,6 +47,24 @@ in
       description = "Nixpkgs source supplied by the flake input.";
     };
     pkgs = lib.darwin.options.mkNullableOption lib.types.pkgs "Optional existing aarch64-darwin package set.";
+    system = mkDefaultOption lib.types.str "aarch64-darwin" ''
+      Legacy default for nixpkgs.hostPlatform.
+    '';
+    hostPlatform =
+      mkDefaultOption (lib.types.either lib.types.str lib.types.attrs) cfg.system ''
+        Host platform used to import Nixpkgs. ndw supports only aarch64-darwin.
+      ''
+      // {
+        apply =
+          value:
+          let
+            platform = lib.systems.elaborate value;
+          in
+          assert lib.asserts.assertMsg (
+            platform.system == "aarch64-darwin"
+          ) "nixpkgs.hostPlatform must target aarch64-darwin";
+          platform;
+      };
     config = mkDefaultOption configType { } ''
       Settings passed when importing Nixpkgs, as an attribute set or a
       function accepting lib and pkgs. Definitions merge recursively,

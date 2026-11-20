@@ -48,6 +48,9 @@ in
     shell.aliases =
       mkDefaultOption (lib.types.attrsOf lib.types.str) { }
         "Aliases shared by Bash and Zsh.";
+    interactiveShellInit =
+      mkDefaultOption lib.types.lines ""
+        "Legacy shared Bash and Zsh interactive startup commands, run before completion.";
     shells =
       mkDefaultOption (lib.types.listOf lib.types.shellPackage) [ ]
         "Additional login shell packages registered in /etc/shells.";

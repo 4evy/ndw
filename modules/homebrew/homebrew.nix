@@ -88,20 +88,24 @@ let
         }
         .${action};
       isCleanup = subcommand == "cleanup";
+      environment = activation.extra.env // {
+        # Keep cleanup separate so its package scope is explicit
+        HOMEBREW_BUNDLE_INSTALL_CLEANUP = "";
+        HOMEBREW_BUNDLE_FORCE_INSTALL_CLEANUP = "";
+        HOMEBREW_NO_AUTO_UPDATE = if onlyCheck || !activation.auto.update then "1" else "";
+      };
+      path = lib.strings.makeBinPath (
+        [ cfg.prefix ] ++ lib.lists.optional (cfg.mas.apps != { }) pkgs.mas
+      );
       application = pkgs.writeShellApplication {
         name = "homebrew-${action}";
-        runtimeInputs =
-          lib.attrsets.attrValues { inherit (cfg) prefix; }
-          ++ lib.lists.optional (cfg.mas.apps != { }) pkgs.mas;
-        runtimeEnv = activation.extra.env // {
-          # Keep cleanup separate so its package scope is explicit
-          HOMEBREW_BUNDLE_INSTALL_CLEANUP = "";
-          HOMEBREW_BUNDLE_FORCE_INSTALL_CLEANUP = "";
-          HOMEBREW_NO_AUTO_UPDATE = if onlyCheck || !activation.auto.update then "1" else "";
-        };
         # Environment values and generated arguments are literal strings
         excludeShellChecks = [ "SC2016" ];
         text = ''
+          ${lib.strings.concatMapAttrsStringSep "\n" (
+            name: value: "export ${name}='${lib.strings.replaceStrings [ "'" ] [ "'\\''" ] value}'"
+          ) environment}
+          export PATH=${lib.strings.escapeShellArg "${path}:"}"$PATH"
           cd "$HOME"
           exec ${
             command (

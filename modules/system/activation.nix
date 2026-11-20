@@ -30,6 +30,7 @@ let
   collect = field: lib.strings.concatMapStringsSep "\n" (step: step.${field}) ordered;
   bootSteps = lib.lists.filter (step: step.on.boot) ordered;
   collectBoot = field: lib.strings.concatMapStringsSep "\n" (step: step.${field}) bootSteps;
+  legacyHooks = config.system.activationScripts;
   command = lib.strings.escapeShellArgs;
   inherit (lib.darwin.shell) failIf;
   valueOptions = [
@@ -45,6 +46,16 @@ let
   '') valueOptions;
 in
 {
+  imports = [
+    (lib.modules.mkAliasOptionModule
+      [ "system" "activationScripts" "postActivation" "text" ]
+      [ "system" "activation" "content" ]
+    )
+  ];
+  options.system.activationScripts.preActivation.text = mkDefaultOption lib.types.lines "" ''
+    Legacy root activation hook. Runs after ndw's preflight and before
+    normal activation steps, never during a check or boot restore.
+  '';
   options.system.activation = {
     runtimeInputs =
       mkDefaultOption (lib.types.listOf lib.types.package) [ ]
@@ -289,6 +300,14 @@ in
             if [[ $boot == true ]]; then
               ${collectBoot "text"}
             else
+              ${lib.strings.optionalString
+                (legacyHooks.preActivation.text != "" || legacyHooks.postActivation.text != "")
+                ''
+                  # shellcheck disable=SC2034
+                  systemConfig=$system
+                ''
+              }
+              ${legacyHooks.preActivation.text}
               ${collect "text"}
             fi
           ) 9>&-

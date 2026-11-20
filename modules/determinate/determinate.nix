@@ -157,6 +157,18 @@ let
   '';
 in
 {
+  options.nix = {
+    enable =
+      mkDefaultOption lib.types.bool cfg.enable
+        "Whether ndw is expected to manage the Nix installation. Use determinateNix.enable to select the managed runtime.";
+    package = lib.options.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = if cfg.enable then cfg.package else null;
+      readOnly = true;
+      description = "Managed Nix runtime for compatibility with imported modules.";
+    };
+  };
+
   options.determinateNix = {
     enable = lib.options.mkEnableOption ''
       declarative Determinate Nix binaries, Nixd, and launchd services on an
@@ -224,6 +236,12 @@ in
 
   config = lib.modules.mkMerge [
     {
+      assertions = [
+        {
+          assertion = config.nix.enable == cfg.enable;
+          message = "ndw only manages Determinate Nix. Set nix.enable to match determinateNix.enable, or omit nix.enable.";
+        }
+      ];
       system.activation.steps = {
         determinate-ready = {
           deps = [ "launchd" ];

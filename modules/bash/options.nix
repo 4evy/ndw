@@ -15,6 +15,10 @@ in
       nullable = true;
     };
     completion.enable = mkDefaultOption lib.types.bool true "Enable Bash completion.";
+    completion.package = lib.options.mkPackageOption pkgs "bash-completion" { };
+    interactiveShellInit =
+      mkDefaultOption lib.types.lines ""
+        "Legacy Bash interactive startup commands, run before completion.";
     history = {
       size = mkDefaultOption (lib.types.nullOr lib.types.int) 10000 "History lines kept in memory.";
       file.path = lib.darwin.options.mkNullableOption lib.types.str "History file path. Shell variables are expanded.";

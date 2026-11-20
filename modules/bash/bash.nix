@@ -36,21 +36,25 @@ in
       _: lib.modules.mkDefault
     ) config.environment.shell.aliases;
     environment.system.packages =
-      lib.lists.optional cfg.completion.enable pkgs.bash-completion
+      lib.lists.optional cfg.completion.enable cfg.completion.package
       ++ lib.lists.optional (cfg.package != null) cfg.package;
-    programs.bash.init.extra = lib.modules.mkIf cfg.completion.enable (
-      lib.modules.mkOrder 100 ''
-        if (( BASH_VERSINFO[0] >= 4 )) && [[ -z ''${BASH_COMPLETION_VERSINFO:-} ]]; then
-          source ${pkgs.bash-completion}/etc/profile.d/bash_completion.sh
-          ${lib.strings.concatMapStringsSep "\n" (profile: ''
-            for completion in ${shell.doubleQuote "${profile}/etc/bash_completion.d/"}*; do
-              if [[ -r $completion ]]; then source "$completion"; fi
-            done
-          '') config.environment.profiles}
-          unset completion
-        fi
-      ''
-    );
+    programs.bash.init.extra = lib.modules.mkMerge [
+      (lib.modules.mkOrder 80 config.environment.interactiveShellInit)
+      (lib.modules.mkOrder 90 cfg.interactiveShellInit)
+      (lib.modules.mkIf cfg.completion.enable (
+        lib.modules.mkOrder 100 ''
+          if (( BASH_VERSINFO[0] >= 4 )) && [[ -z ''${BASH_COMPLETION_VERSINFO:-} ]]; then
+            source ${cfg.completion.package}/etc/profile.d/bash_completion.sh
+            ${lib.strings.concatMapStringsSep "\n" (profile: ''
+              for completion in ${shell.doubleQuote "${profile}/etc/bash_completion.d/"}*; do
+                if [[ -r $completion ]]; then source "$completion"; fi
+              done
+            '') config.environment.profiles}
+            unset completion
+          fi
+        ''
+      ))
+    ];
     environment.files.bashrc.known.hashes = (import ./hashes.nix).bashrc;
     environment.files.bashrc.known.macOS = true;
     system.activation.checks = ''

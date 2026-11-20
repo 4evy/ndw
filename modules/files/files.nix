@@ -6,7 +6,8 @@
 }:
 let
   inherit (lib.darwin.options) mkDefaultOption;
-  files = lib.attrsets.filterAttrs (_: file: file.enable) config.environment.files;
+  enabled = lib.attrsets.filterAttrs (_: file: file.enable) config.environment.files;
+  files = lib.attrsets.mapAttrs' (_: file: lib.attrsets.nameValuePair file.target file) enabled;
   lines = lib.strings.concatStringsSep "\n";
   command = lib.strings.escapeShellArgs;
   backupSuffixes = [
@@ -94,6 +95,10 @@ let
 
 in
 {
+  imports = [
+    (lib.modules.mkAliasOptionModule [ "environment" "etc" ] [ "environment" "files" ])
+  ];
+
   options.environment.files = lib.options.mkOption {
     default = { };
     description = ''
@@ -113,10 +118,14 @@ in
     '';
     type = lib.types.attrsOf (
       lib.types.submodule (
-        { config, ... }: {
+        { config, name, ... }: {
+          imports = [
+            (lib.modules.mkAliasOptionModule [ "knownSha256Hashes" ] [ "known" "hashes" ])
+          ];
           options = {
             enable = mkDefaultOption lib.types.bool true "Whether to deploy this file.";
             text = mkDefaultOption lib.types.lines "" "Text of the managed file.";
+            target = mkDefaultOption lib.types.str name "Relative destination path under /etc.";
             source =
               mkDefaultOption lib.types.path (pkgs.writeText "file" config.text)
                 "Source deployed instead of text."
@@ -138,13 +147,20 @@ in
     );
   };
   config = {
-    assertions = lib.attrsets.mapAttrsToList (name: _: {
+    assertions = [
+      {
+        assertion =
+          builtins.length (builtins.attrNames enabled) == builtins.length (builtins.attrNames files);
+        message = "Enabled environment.files entries must have distinct targets";
+      }
+    ]
+    ++ lib.attrsets.mapAttrsToList (name: _: {
       assertion =
         lib.darwin.paths.isRelativeFile name
         && name != "static"
         && !lib.strings.hasPrefix "static/" name
         && !lib.lists.any (parent: lib.strings.hasPrefix "${parent}/" name) (builtins.attrNames files);
-      message = "environment.files.${name} must be a relative path outside static/, without traversal or another managed file as a parent";
+      message = "Managed /etc target ${name} must be a relative path outside static/, without traversal or another managed file as a parent";
     }) files;
     system.build.files = pkgs.linkFarm "etc" (lib.attrsets.mapAttrs (_: file: file.source) files);
     system.build.manifest = (pkgs.formats.json { }).generate "files.json" (

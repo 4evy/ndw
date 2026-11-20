@@ -20,5 +20,6 @@
     ./launchd/launchd.nix
     ./homebrew/homebrew.nix
     ./nh/nh.nix
+    ./security/pam.nix
   ];
 }

@@ -46,7 +46,7 @@
     };
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-  inputs.determinate.url = "github:DeterminateSystems/determinate/v3.23.2";
+  inputs.determinate.url = "github:DeterminateSystems/determinate/v3.24.2";
 
   description = "Darwin activation, shells, and launchd";
 }

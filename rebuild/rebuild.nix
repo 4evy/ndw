@@ -11,19 +11,11 @@
 }:
 let
   inherit (lib.darwin.shell) fail failIf;
+  activationPaths = import ../modules/system/activation/paths.nix;
   activate = rollback: ''
-    if /usr/bin/grep -Fqx '# darwin: profile-aware activation' "$system/activate"; then
-      "''${as_root[@]}" "$system/activate" --profile "$profile" ${lib.strings.optionalString rollback ''--generation "$generation"''}
-    else
-      # Old activators cannot read the pending-state journal. Rebuild an old
-      # configuration with the current core for full recovery after a failure
-      nix_env=$(type -P nix-env)
-      "''${as_root[@]}" "$system/activate"
-      "''${as_root[@]}" "$nix_env" --profile "$profile" ${
-        if rollback then ''--switch-generation "$generation"'' else ''--set "$system"''
-      }
-    fi
-    ${lib.strings.optionalString rollback "exit"}
+    # Legacy scripts cannot participate in the lock and success journal
+    ${failIf ''! /usr/bin/grep -Fqx '# darwin: profile-aware activation' "$system/activate"'' "this system cannot commit an ndw activation, rebuild its configuration with the current core"}
+    "''${as_root[@]}" "$system/activate" --profile "$profile" ${lib.strings.optionalString rollback ''--generation "$generation"''}
   '';
   actions = {
     build = {
@@ -66,9 +58,9 @@ let
       build = false;
       nix = false;
       text = ''
-        selected=/nix/var/nix/gcroots/darwin/current
-        if [[ ! -e $selected ]]; then selected=$profile; fi
-        system=$(readlink --canonicalize-existing -- "$selected")
+        activation_state=${lib.strings.escapeShellArg activationPaths.state}
+        ${builtins.readFile ../modules/system/activation/recovery.sh}
+        system=$(activation_recovery_system "$profile")
         ${failIf ''[[ ! -x $system/activate ]] || ! /usr/bin/grep -Fqx '# darwin: boot-aware activation' "$system/activate"'' "repair requires a successful generation built with boot-aware activation"}
         exec "''${as_root[@]}" "$system/activate" --boot
       '';

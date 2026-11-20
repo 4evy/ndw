@@ -5,11 +5,14 @@
   pkgs,
   ...
 }:
+let
+  paths = import ./activation/paths.nix;
+in
 {
   launchd.daemons.activate-system = {
     enable = true;
     load.on.activation = false;
-    path = lib.attrsets.attrValues { inherit (pkgs) coreutils; };
+    path = lib.attrsets.attrValues { inherit (pkgs) coreutils flock; };
     environment.variables = {
       USER = "root";
       LOGNAME = "root";
@@ -20,25 +23,25 @@
       LC_CTYPE = "UTF-8";
     };
     script = ''
-      # A failed attempt must never become the successful system after reboot
-      # Direct activation also advances this marker without adding a profile
-      # generation, so it remains selected after a normal reboot
-      # Restore core files without running rebuild hooks or Homebrew at boot
-      # Pending launchd changes are reconciled by an explicit retry or rollback
-      # TODO: Verify real boot ordering and APFS /run creation after a reboot
-      selected=/nix/var/nix/gcroots/darwin/current
-      if [[ ! -e $selected ]]; then selected=${lib.strings.escapeShellArg config.system.profile}; fi
-      systemConfig=$(readlink --canonicalize -- "$selected")
-
+      activation_state=${lib.strings.escapeShellArg paths.state}
+      profile=${lib.strings.escapeShellArg config.system.profile}
+    ''
+    + builtins.readFile ./activation/recovery.sh
+    + ''
+      systemConfig=$(activation_recovery_system "$profile")
       if /usr/bin/grep -Fqx '# darwin: boot-aware activation' "$systemConfig/activate"; then
+        # The activator revalidates the selection under its lock
         exec "$systemConfig/activate" --boot
       fi
-      # Legacy generations have no selective boot mode. Restore their pointers
-      # without running arbitrary rebuild hooks during early boot
+
+      # Legacy generations have no selective boot mode. Restore their
+      # pointers without running arbitrary rebuild hooks during early boot
+      umask 0022
+      exec 9>>${lib.strings.escapeShellArg paths.lock}
+      ${lib.darwin.shell.failIf "! flock --exclusive --nonblock 9" "another Darwin activation is in progress"}
+      ${lib.darwin.shell.failIf ''[[ $(activation_recovery_system "$profile") != "$systemConfig" ]]'' "the recovery target changed"}
       ln --symbolic --force --no-target-directory -- "$systemConfig" /run/current-system
-      if [[ -d /nix/var/nix/gcroots ]]; then
-        ln --symbolic --force --no-target-directory -- /run/current-system /nix/var/nix/gcroots/current-system
-      fi
+      ln --symbolic --force --no-target-directory -- /run/current-system "''${activation_state%/*}/current-system"
     '';
     config = {
       RunAtLoad = true;

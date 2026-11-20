@@ -10,7 +10,7 @@
   ],
 }:
 let
-  inherit (lib.darwin.shell) failIf;
+  inherit (lib.darwin.shell) fail failIf;
   activate = rollback: ''
     if /usr/bin/grep -Fqx '# darwin: profile-aware activation' "$system/activate"; then
       "''${as_root[@]}" "$system/activate" --profile "$profile" ${lib.strings.optionalString rollback ''--generation "$generation"''}
@@ -36,7 +36,12 @@ let
       build = true;
       rooted = true;
       flags = [ ];
-      text = activate false;
+      text = ''
+        if [[ -n $profile_name && $profile_name != system && ! -d $system_profiles ]]; then
+          "''${as_root[@]}" ${lib.meta.getExe' pkgs.coreutils "mkdir"} --parents --mode=755 -- "$system_profiles"
+        fi
+        ${activate false}
+      '';
     };
     check = {
       build = true;
@@ -51,8 +56,9 @@ let
       build = false;
       nix = false;
       text = ''
-        system=$(readlink --canonicalize -- "''${0%/sw/bin/darwin}")
-        ${failIf "[[ ! -x $system/activate ]]" "run activate through a built system at sw/bin/darwin"}
+        ${failIf "[[ $0 != */sw/bin/darwin && $0 != */sw/bin/darwin-rebuild ]]" "run activate through a built system at sw/bin/darwin or sw/bin/darwin-rebuild"}
+        system=$(readlink --canonicalize -- "''${0%/sw/bin/*}")
+        ${failIf "[[ ! -x $system/activate ]]" "run activate through a built system at sw/bin/darwin or sw/bin/darwin-rebuild"}
         exec "''${as_root[@]}" "$system/activate"
       '';
     };
@@ -69,7 +75,10 @@ let
     };
     generations = {
       build = false;
-      text = ''exec nix-env --profile "$profile" --list-generations'';
+      text = ''
+        if [[ -n $profile_name && $profile_name != system && ! -e $system_profiles ]]; then exit 0; fi
+        exec nix-env --profile "$profile" --list-generations
+      '';
     };
     rollback = {
       build = false;
@@ -107,8 +116,8 @@ let
       actions = buildActions;
     };
     profile = {
-      variable = "profile";
-      default = profile;
+      variable = "profile_path";
+      default = "";
       argument = "PATH";
       description = "system profile for generations and switching";
     };
@@ -191,9 +200,9 @@ let
       }
       ;;
   '') options;
-  # Forward evaluation options with their literal arguments, including values
-  # that start with a dash. Keep build-only options out of configuration lookup
-  evaluationOptions = [
+  # Classify Nix options before looking at their literal arguments, including
+  # values that look like rebuild flags. Only evaluation options reach lookup
+  nixOptions = [
     {
       patterns = [
         "--arg"
@@ -246,6 +255,36 @@ let
       arguments = 0;
       forward = true;
     }
+    {
+      patterns = [
+        "--cores"
+        "--max-jobs"
+        "-j"
+        "--log-format"
+        "--substituters"
+      ];
+      arguments = 1;
+      forward = false;
+    }
+    {
+      patterns = [
+        "--verbose"
+        "-v"
+        "-vv"
+        "-vvv"
+        "-vvvv"
+        "-vvvvv"
+        "--print-build-logs"
+        "-L"
+        "-vL"
+        "-j[0-9]*"
+        "--keep-going"
+        "--keep-failed"
+        "--fallback"
+      ];
+      arguments = 0;
+      forward = false;
+    }
   ];
   parseEvaluationOptions = lib.strings.concatMapStringsSep "\n" (option: ''
     ${lib.strings.concatStringsSep "|" option.patterns})
@@ -255,9 +294,23 @@ let
         remaining=${toString option.arguments}
       ''}
       ;;
-  '') evaluationOptions;
+  '') (lib.lists.filter (option: option.forward || option.arguments > 0) nixOptions);
+  parseNixOptions = lib.strings.concatMapStringsSep "\n" (option: ''
+    ${lib.strings.concatStringsSep "|" option.patterns})
+      ${lib.strings.optionalString (option.arguments > 0) (
+        failIf "[[ $# -le ${toString option.arguments} ]]" "forwarded Nix option is missing required arguments"
+      )}
+      flags+=("''${@:1:${toString (option.arguments + 1)}}")
+      shift ${toString (option.arguments + 1)}
+      ;;
+  '') nixOptions;
+  usage = "{${lib.strings.concatStringsSep "|" (builtins.attrNames actions)}} [options] [-- nix build flags]";
   help = [
-    "darwin {${lib.strings.concatStringsSep "|" (builtins.attrNames actions)}} [options] [-- nix build flags]"
+    "  --list-generations                   alias for generations"
+    "  [switch] --rollback                 alias for rollback"
+    "  [switch] --switch-generation N      alias for rollback --generation N (short: -G N)"
+    "  --profile-name NAME                 named profile for generations, rollback, or switch (short: -p NAME)"
+    "  use -- to pass additional Nix build flags"
     "  builds run as the caller, activation uses sudo when needed"
     "  repair restores core files and links from the last successful system without building"
   ]
@@ -270,6 +323,9 @@ let
 in
 pkgs.writeShellApplication {
   name = "darwin";
+  derivationArgs.postCheck = ''
+    ln -s darwin "$out/bin/darwin-rebuild"
+  '';
   runtimeInputs = lib.attrsets.attrValues { inherit (pkgs) coreutils; };
   text = ''
     ${lib.strings.toShellVars (
@@ -277,11 +333,16 @@ pkgs.writeShellApplication {
         _: option: lib.attrsets.nameValuePair option.variable option.default
       ) options)
       // {
+        inherit profile;
         flags = [ ];
         as_root = [ ];
+        profile_name = "";
+        action = "";
+        legacy_action = "";
       }
     )}
     usage() {
+      printf '%s %s\n' "''${0##*/}" ${lib.strings.escapeShellArg usage}
       ${command (
         [
           "printf"
@@ -294,18 +355,54 @@ pkgs.writeShellApplication {
       usage
       exit 0
     fi
-    action=$1
-    shift
+    system_profiles=/nix/var/nix/profiles/system-profiles
     while [[ $# -gt 0 ]]; do
       case $1 in
       ${parse}
+      ${lib.strings.concatStringsSep "|" (builtins.attrNames actions)})
+        ${failIf "[[ -n $action ]]" "specify only one action"}
+        action=$1
+        shift
+        ;;
+      --list-generations|--rollback|--switch-generation|-G)
+        ${failIf "[[ -n $legacy_action ]]" "specify only one generation action"}
+        case $1 in
+        --list-generations) legacy_action=generations ;;
+        --rollback) legacy_action=rollback ;;
+        *)
+          ${failIf "[[ $# -lt 2 || ! $2 =~ ^[0-9]+$ ]]" "select a generation number with --switch-generation N"}
+          legacy_action=rollback
+          generation=$2
+          shift
+          ;;
+        esac
+        shift
+        ;;
+      --profile-name|-p)
+        ${failIf "[[ $# -lt 2 || -z $2 || $2 == -* || $2 == . || $2 == .. || $2 == */* ]]" "profile name must be a single nonempty path component not starting with a dash"}
+        ${failIf "[[ $2 =~ -[0-9]+-link ]]" "profile name must not be mistaken for a generation link"}
+        profile_name=$2
+        shift 2
+        ;;
+      --no-flake)
+        ${fail "error: --no-flake is not supported, select a configuration with --flake URI#NAME"}
+        ;;
+      edit|changelog)
+        printf >&2 'error: action %s is not supported\n' "$1"
+        exit 2
+        ;;
+      -k|-K)
+        if [[ $1 == -k ]]; then flags+=(--keep-going); else flags+=(--keep-failed); fi
+        shift
+        ;;
+      ${parseNixOptions}
       --help)
         usage
         exit 0
         ;;
       --)
         shift
-        flags=("$@")
+        flags+=("$@")
         break
         ;;
       *)
@@ -314,6 +411,25 @@ pkgs.writeShellApplication {
         ;;
       esac
     done
+    if [[ -n $legacy_action ]]; then
+      case "$action:$legacy_action" in
+      :*|generations:generations|rollback:rollback|switch:rollback) action=$legacy_action ;;
+      *) ${fail "error: generation action conflicts with the requested action"} ;;
+      esac
+    fi
+    ${failIf "[[ -n $profile_path && -n $profile_name ]]" "choose either --profile PATH or --profile-name NAME"}
+    if [[ -n $profile_name ]]; then
+      case $action in
+      generations|rollback|switch) ;;
+      *) ${fail "error: --profile-name requires generations, rollback, or switch"} ;;
+      esac
+      if [[ $profile_name != system ]]; then
+        ${failIf "[[ -L $system_profiles ]]" "system-profiles must not be a symlink"}
+        profile=$system_profiles/$profile_name
+      fi
+    elif [[ -n $profile_path ]]; then
+      profile=$profile_path
+    fi
     # Build with the caller's credentials, then elevate only activation
     if [[ $(id --user) == 0 ]]; then
       export HOME=~root

@@ -28,10 +28,18 @@
       };
     in
     {
-      lib.darwin = lib.darwin;
+      lib = {
+        inherit (lib) darwin;
+        darwinSystem = import ./lib/darwin-system.nix { inherit lib; };
+      };
+      flakeModules.default = ./lib/flake-module.nix;
+      overlays.default = _: prev: {
+        darwin-rebuild = prev.callPackage ./rebuild/rebuild.nix { inherit lib; };
+      };
       packages.aarch64-darwin = {
         inherit darwin;
         default = darwin;
+        darwin-rebuild = darwin;
         darwin-settings = settingsTools;
         darwin-settings-scripts = settingsScripts;
       };

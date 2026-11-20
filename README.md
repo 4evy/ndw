@@ -11,9 +11,6 @@ your config or generate scripts from it on its own
 making the low-level pieces work well, so you can build your own modules on top.
 Everything else is up to you**
 
-There are no docs or tests, and I won't be adding any. I won't be adding more
-modules either
-
 I only support macOS 27 (Golden Gate) or newer on Apple Silicon
 (`aarch64-darwin`)
 
@@ -50,38 +47,21 @@ You can also set `determinateNix.enable = true` to let ndw manage Nix, Nixd, and
 their launchd services. Install Determinate first, then use your flake for
 upgrades once that's enabled
 
-## Old option names
+## Optional features
 
-A lot of names use dots now, but these common names still work. They're aliases,
-so you can use either spelling without warnings. Other old names may still need
-updating
+- Install [nh](https://github.com/nix-community/nh) with
+  `programs.nh.enable = true`. Set `programs.nh.clean.enable = true` to prune
+  old system generations weekly. Keep using `darwin switch` for activation
+- Enable Touch ID with `security.pam.services.sudo_local.touchIdAuth = true`.
+  Set `reattach = true` in the same block if needed for tmux or screen
 
-| Alias                               | Dotted name                          |
-| ----------------------------------- | ------------------------------------ |
-| `environment.systemPackages`        | `environment.system.packages`        |
-| `environment.shellAliases`          | `environment.shell.aliases`          |
-| `environment.pathsToLink`           | `environment.paths.link`             |
-| `environment.extraOutputsToInstall` | `environment.outputs.install`        |
-| `system.primaryUser`                | `system.primary.user`                |
-| `system.configurationRevision`      | `system.configuration.revision`      |
-| `programs.bash.shellAliases`        | `programs.bash.shell.aliases`        |
-| `programs.bash.enableCompletion`    | `programs.bash.completion.enable`    |
-| `programs.zsh.shellAliases`         | `programs.zsh.shell.aliases`         |
-| `programs.zsh.enableCompletion`     | `programs.zsh.completion.enable`     |
-| `homebrew.enableBashIntegration`    | `homebrew.bash.integration.enable`   |
-| `homebrew.enableZshIntegration`     | `homebrew.zsh.integration.enable`    |
-| `homebrew.onActivation.autoUpdate`  | `homebrew.on.activation.auto.update` |
-| `homebrew.onActivation.upgrade`     | `homebrew.on.activation.upgrade`     |
-| `homebrew.onActivation.cleanup`     | `homebrew.on.activation.cleanup`     |
-| `homebrew.onActivation.extraFlags`  | `homebrew.on.activation.extra.flags` |
-| `homebrew.global.autoUpdate`        | `homebrew.global.auto.update`        |
-| `homebrew.caskArgs`                 | `homebrew.cask.args`                 |
-| `homebrew.greedyCasks`              | `homebrew.greedy.casks`              |
-| `homebrew.masApps`                  | `homebrew.mas.apps`                  |
-| `homebrew.extraConfig`              | `homebrew.extra.config`              |
+## Migrating from nix-darwin
 
-The rebuild command also accepts `darwinConfigurations` as well as
-`darwin.configurations`
+Keep `lib.darwinSystem`, `darwinConfigurations`, and `darwin-rebuild`. See the
+[alias map](modules/aliases/aliases.nix) for renamed options
+
+ndw does not provide all upstream services or state-version defaults. It
+manages only Determinate Nix, and launchd agents target the primary user
 
 ## Credits
 
